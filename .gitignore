@@ -1,0 +1,28 @@
+# .gitignore
+
+# Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Agent state
+.hermes/
+
+# Worker
+worker/node_modules/
+worker/.wrangler/
+\n# Python cache\n__pycache__/\n*.pyc

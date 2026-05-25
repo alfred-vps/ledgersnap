@@ -1,0 +1,23 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "ledgersnap-api"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+
+# KV namespace for rate limiting or session persistence (optional for MVP)
+# [[kv_namespaces]]
+# binding = "SESSION_STORE"
+# id = ""
+
+[observability]
+enabled = true
+
+[placement]
+mode = "smart"
+
+# Environment variables
+[vars]
+# ANTHROPIC_API_KEY is set via `wrangler secret put ANTHROPIC_API_KEY`
+# Do not commit secrets to git.
+
+# Logging
+LOG_LEVEL = "info"
