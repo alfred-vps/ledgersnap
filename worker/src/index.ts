@@ -34,6 +34,8 @@ interface ExtractRequest {
   images: string[];
   /** Optional override for the user prompt */
   prompt?: string;
+  /** Optional model override (defaults to MODEL_NAME env var or openrouter/free) */
+  model?: string;
 }
 
 interface ExtractResponse {
@@ -90,6 +92,7 @@ Return this exact JSON structure:
 
 interface Env {
   OPENROUTER_API_KEY?: string;
+  MODEL_NAME?: string;
   LOG_LEVEL?: string;
 }
 
@@ -186,7 +189,7 @@ export default {
             "X-Title": "LedgerSnap",
           },
           body: JSON.stringify({
-            model: "openrouter/free",
+            model: body.model || env.MODEL_NAME || "openrouter/free",
             max_tokens: 4096,
             messages: [
               { role: "system", content: SYSTEM_PROMPT },

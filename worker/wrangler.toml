@@ -19,5 +19,9 @@ mode = "smart"
 # ANTHROPIC_API_KEY is set via `wrangler secret put ANTHROPIC_API_KEY`
 # Do not commit secrets to git.
 
+# Model — changeable via wrangler secret put or env var, no redeploy needed
+# Examples: "openrouter/free", "google/gemini-3.1-flash-lite", "openai/gpt-4o"
+MODEL_NAME = "openrouter/free"
+
 # Logging
 LOG_LEVEL = "info"
