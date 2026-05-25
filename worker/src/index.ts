@@ -93,6 +93,7 @@ Return this exact JSON structure:
 interface Env {
   OPENROUTER_API_KEY?: string;
   MODEL_NAME?: string;
+  AUTH_PASSWORD?: string;
   LOG_LEVEL?: string;
 }
 
@@ -106,7 +107,7 @@ export default {
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, x-api-key",
+      "Access-Control-Allow-Headers": "Content-Type, x-api-key, x-auth-password",
     };
 
     // Preflight
@@ -132,6 +133,17 @@ export default {
         { success: false, error: "OPENROUTER_API_KEY not configured" } satisfies ExtractResponse,
         { status: 500, headers: corsHeaders }
       );
+    }
+
+    // Auth check: password required when AUTH_PASSWORD is set
+    if (env.AUTH_PASSWORD) {
+      const authPw = request.headers.get("x-auth-password") || "";
+      if (authPw !== env.AUTH_PASSWORD) {
+        return Response.json(
+          { success: false, error: "Unauthorized — invalid password" } satisfies ExtractResponse,
+          { status: 403, headers: corsHeaders }
+        );
+      }
     }
 
     // Parse request body

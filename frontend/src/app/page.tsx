@@ -69,6 +69,10 @@ export default function Home() {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
+  const [password, setPassword] = useState("");
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [pendingProcess, setPendingProcess] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("openrouter/free");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback(async (fileList: FileList) => {
@@ -98,6 +102,14 @@ export default function Home() {
 
   const processAll = useCallback(async () => {
     if (files.length === 0) return;
+
+    // Check password — prompt if not set yet
+    if (!password) {
+      setPendingProcess(true);
+      setShowPasswordModal(true);
+      return;
+    }
+
     setProcessing(true);
     setError(null);
 
@@ -143,7 +155,8 @@ export default function Home() {
 
         // Step 2: Extract via Worker
         const response = await extractInvoice(
-          images
+          images,
+          { password, model: selectedModel }
         );
 
         if (!response.success || !response.data) {
@@ -173,7 +186,7 @@ export default function Home() {
     }
 
     setProcessing(false);
-  }, [files]);
+  }, [files, password, selectedModel]);
 
   const handleDownload = useCallback(() => {
     const results = files
@@ -214,7 +227,23 @@ export default function Home() {
           <h1 className="text-2xl font-bold">
             <span className="text-green-600">Ledger</span>Snap
           </h1>
-          <div className="relative">
+          <div className="flex items-center gap-3">
+            {/* Model Selector */}
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-green-400"
+            >
+              <option value="openrouter/free">🆓 Free</option>
+              <option value="google/gemini-3.1-flash-lite">⚡ Gemini 3.1 Flash Lite</option>
+              <option value="google/gemini-2.5-pro">⭐ Gemini 2.5 Pro</option>
+              <option value="openai/gpt-4o">🤖 GPT-4o</option>
+              <option value="openai/gpt-4.1-mini">💰 GPT-4.1 Mini</option>
+              <option value="anthropic/claude-sonnet-4">🧠 Claude Sonnet 4</option>
+              <option value="qwen/qwen3-vl-235b-a22b-instruct">🐉 Qwen3 VL</option>
+            </select>
+            {/* Hamburger Menu */}
+            <div className="relative">
             <button
               onClick={() => setShowMenu(!showMenu)}
               className="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
@@ -261,6 +290,7 @@ export default function Home() {
             )}
           </div>
         </div>
+      </div>
       </header>
 
       <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
@@ -438,6 +468,59 @@ export default function Home() {
           </section>
         )}
       </div>
+
+      {/* Password Modal */}
+      {showPasswordModal && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-30" onClick={() => { setShowPasswordModal(false); setPendingProcess(false); }} />
+          <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm">
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">Enter Auth Password</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                This app is password-protected. Enter the auth key to unlock extraction.
+              </p>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter password..."
+                autoFocus
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-green-400"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    setShowPasswordModal(false);
+                    if (pendingProcess) {
+                      setPendingProcess(false);
+                      // Trigger processAll via setTimeout to avoid state conflict
+                      setTimeout(() => processAll(), 0);
+                    }
+                  }
+                }}
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => { setShowPasswordModal(false); setPendingProcess(false); }}
+                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowPasswordModal(false);
+                    if (pendingProcess) {
+                      setPendingProcess(false);
+                      setTimeout(() => processAll(), 0);
+                    }
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg"
+                >
+                  Unlock
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </main>
   );
 }

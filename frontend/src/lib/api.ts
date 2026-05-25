@@ -1,14 +1,14 @@
 /**
  * LedgerSnap — API client for the Cloudflare Worker.
  *
- * The Worker is a thin proxy that forwards PDF page images
- * to Claude Sonnet 4 Vision and returns structured JSON.
+ * Sends base64 JPEG images + auth password + optional model override
+ * to the Worker, which proxies to OpenRouter.
  */
 
 import type { ExtractedInvoice } from "@/types";
 
 const WORKER_URL =
-  process.env.NEXT_PUBLIC_WORKER_URL || "https://ledgersnap-api.alfred-vps.workers.dev";
+  process.env.NEXT_PUBLIC_WORKER_URL || "https://ledgersnap-api.pre-genesis.workers.dev";
 
 export interface ExtractResponse {
   success: boolean;
@@ -20,26 +20,31 @@ export interface ExtractResponse {
  * Send PDF page images (base64 JPEG) to the Worker for extraction.
  *
  * @param images - Array of base64 JPEG strings (without data: prefix)
- * @param apiKey - Optional Anthropic API key override
+ * @param options - Optional: auth password and model override
  * @returns Extracted invoice data
  */
 export async function extractInvoice(
   images: string[],
-  apiKey?: string
+  options?: { password?: string; model?: string }
 ): Promise<ExtractResponse> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
-  if (apiKey) {
-    headers["x-api-key"] = apiKey;
+  if (options?.password) {
+    headers["x-auth-password"] = options.password;
+  }
+
+  const body: Record<string, unknown> = { images };
+  if (options?.model) {
+    body.model = options.model;
   }
 
   try {
-    const res = await fetch(`${WORKER_URL}`, {
+    const res = await fetch(WORKER_URL, {
       method: "POST",
       headers,
-      body: JSON.stringify({ images }),
+      body: JSON.stringify(body),
     });
 
     return res.json() as Promise<ExtractResponse>;
