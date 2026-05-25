@@ -1,8 +1,8 @@
 /**
- * LedgerSnap — Client-side PDF renderer using pdf.js
+ * LedgerSnap — Client-side file renderer
  *
- * Converts PDF pages to JPEG base64 strings in the browser.
- * No server-side PDF processing needed — this is the Cloudflare-native approach.
+ * Converts PDF pages or image files to JPEG base64 strings in the browser.
+ * No server-side processing needed — this is the Cloudflare-native approach.
  */
 
 import * as pdfjs from "pdfjs-dist";
@@ -75,6 +75,41 @@ export async function pdfToBase64Images(
 }
 
 /**
+ * Convert an image file (JPEG/PNG) to an array with one base64 JPEG string.
+ * Images are single-page, so result is always a single-element array.
+ */
+export async function imageToBase64(file: File): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(MAX_WIDTH / img.width, 2);
+      const width = Math.round(img.width * scale);
+      const height = Math.round(img.height * scale);
+
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext("2d")!;
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.convertToBlob({ type: "image/jpeg", quality: JPEG_QUALITY })
+        .then(async (blob) => {
+          const b64 = await blobToBase64(blob);
+          URL.revokeObjectURL(img.src);
+          resolve([b64]);
+        })
+        .catch(reject);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(img.src);
+      reject(new Error("Failed to load image"));
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/**
  * Convert a Blob to a base64 string (without the data: prefix).
  */
 function blobToBase64(blob: Blob): Promise<string> {
@@ -82,7 +117,6 @@ function blobToBase64(blob: Blob): Promise<string> {
     const reader = new FileReader();
     reader.onloadend = () => {
       const result = reader.result as string;
-      // Strip the "data:image/jpeg;base64," prefix
       const base64 = result.split(",")[1];
       resolve(base64);
     };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { pdfToBase64Images, compileCSV } from "@/lib/pdf-renderer";
+import { pdfToBase64Images, imageToBase64, compileCSV } from "@/lib/pdf-renderer";
 import { extractInvoice, downloadCSV } from "@/lib/api";
 import type { ExtractedInvoice, LineItem } from "@/types";
 
@@ -10,15 +10,34 @@ import type { ExtractedInvoice, LineItem } from "@/types";
 // ─────────────────────────────────────────────
 
 type FileStatus = "pending" | "rendering" | "extracting" | "completed" | "failed";
+type FileKind = "pdf" | "image";
 
 interface FileEntry {
   id: string;
   filename: string;
   size: number;
+  kind: FileKind;
   status: FileStatus;
   pages: number;
   result: ExtractedInvoice | null;
   error: string | null;
+}
+
+const IMAGE_EXTS = [".jpg", ".jpeg", ".png"];
+
+function isImage(filename: string): boolean {
+  const lower = filename.toLowerCase();
+  return IMAGE_EXTS.some((ext) => lower.endsWith(ext));
+}
+
+function isPDF(filename: string): boolean {
+  return filename.toLowerCase().endsWith(".pdf");
+}
+
+function getFileKind(filename: string): FileKind | null {
+  if (isPDF(filename)) return "pdf";
+  if (isImage(filename)) return "image";
+  return null;
 }
 
 // ─────────────────────────────────────────────
@@ -55,19 +74,20 @@ export default function Home() {
 
   const addFiles = useCallback(async (fileList: FileList) => {
     setError(null);
-    const pdfs = Array.from(fileList).filter(
-      (f) => f.name.toLowerCase().endsWith(".pdf")
+    const supported = Array.from(fileList).filter(
+      (f) => getFileKind(f.name) !== null
     );
 
-    if (pdfs.length === 0) {
-      setError("No PDF files found. Select .pdf files only.");
+    if (supported.length === 0) {
+      setError("No supported files. Drop PDF, JPG, JPEG, or PNG files.");
       return;
     }
 
-    const entries: FileEntry[] = pdfs.map((f) => ({
+    const entries: FileEntry[] = supported.map((f) => ({
       id: crypto.randomUUID(),
       filename: f.name,
       size: f.size,
+      kind: getFileKind(f.name)!,
       status: "pending",
       pages: 0,
       result: null,
@@ -82,7 +102,6 @@ export default function Home() {
     setProcessing(true);
     setError(null);
 
-    // Get the files from the input
     const input = fileInputRef.current;
     const rawFiles = input?.files;
     if (!rawFiles) {
@@ -91,28 +110,33 @@ export default function Home() {
       return;
     }
 
-    const pdfs = Array.from(rawFiles).filter((f) =>
-      f.name.toLowerCase().endsWith(".pdf")
+    const supported = Array.from(rawFiles).filter(
+      (f) => getFileKind(f.name) !== null
     );
 
-    for (let i = 0; i < pdfs.length; i++) {
-      const pdfFile = pdfs[i];
+    for (let i = 0; i < supported.length; i++) {
+      const file = supported[i];
+      const kind = getFileKind(file.name)!;
 
-      // Update status to rendering
       setFiles((prev) =>
         prev.map((f) =>
-          f.filename === pdfFile.name ? { ...f, status: "rendering" } : f
+          f.filename === file.name ? { ...f, status: "rendering" } : f
         )
       );
 
       try {
-        // Step 1: Render PDF to images
-        const buffer = await pdfFile.arrayBuffer();
-        const images = await pdfToBase64Images(buffer);
+        // Step 1: Convert file to JPEG base64 images
+        let images: string[];
+        if (kind === "pdf") {
+          const buffer = await file.arrayBuffer();
+          images = await pdfToBase64Images(buffer);
+        } else {
+          images = await imageToBase64(file);
+        }
 
         setFiles((prev) =>
           prev.map((f) =>
-            f.filename === pdfFile.name
+            f.filename === file.name
               ? { ...f, status: "extracting", pages: images.length }
               : f
           )
@@ -130,7 +154,7 @@ export default function Home() {
 
         setFiles((prev) =>
           prev.map((f) =>
-            f.filename === pdfFile.name
+            f.filename === file.name
               ? { ...f, status: "completed", result: response.data! }
               : f
           )
@@ -138,7 +162,7 @@ export default function Home() {
       } catch (err) {
         setFiles((prev) =>
           prev.map((f) =>
-            f.filename === pdfFile.name
+            f.filename === file.name
               ? {
                   ...f,
                   status: "failed",
@@ -249,16 +273,16 @@ export default function Home() {
             />
           </svg>
           <p className="text-lg font-medium text-gray-700">
-            Drop PDF invoices here
+            Drop invoices here
           </p>
           <p className="text-sm text-gray-500 mt-1">
-            or click to browse — processes entirely in your browser
+            Supports PDF, JPG, JPEG, PNG — processes entirely in your browser
           </p>
           <input
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".pdf"
+            accept=".pdf,.jpg,.jpeg,.png"
             className="hidden"
             onChange={(e) => {
               if (e.target.files) addFiles(e.target.files);
@@ -399,6 +423,12 @@ export default function Home() {
 // ─────────────────────────────────────────────
 
 function FileRow({ file }: { file: FileEntry }) {
+  const kindBadge = file.kind === "pdf" ? (
+    <span className="text-[10px] font-semibold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">PDF</span>
+  ) : (
+    <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">IMG</span>
+  );
+
   const statusIcon = () => {
     switch (file.status) {
       case "pending":
@@ -419,7 +449,7 @@ function FileRow({ file }: { file: FileEntry }) {
       case "pending":
         return "Waiting";
       case "rendering":
-        return "Rendering pages...";
+        return file.kind === "pdf" ? "Rendering pages..." : "Processing image...";
       case "extracting":
         return `Extracting (${file.pages} page${file.pages > 1 ? "s" : ""})...`;
       case "completed":
@@ -433,7 +463,10 @@ function FileRow({ file }: { file: FileEntry }) {
     <div className="px-6 py-3 flex items-center gap-4">
       <div className="text-lg">{statusIcon()}</div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-800 truncate">{file.filename}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-gray-800 truncate">{file.filename}</p>
+          {kindBadge}
+        </div>
         <p className="text-xs text-gray-400">
           {formatBytes(file.size)} &middot; {statusLabel()}
         </p>
