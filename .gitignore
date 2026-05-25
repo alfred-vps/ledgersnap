@@ -1,5 +1,3 @@
-# .gitignore
-
 # Next.js
 node_modules/
 .next/
@@ -25,4 +23,7 @@ Thumbs.db
 # Worker
 worker/node_modules/
 worker/.wrangler/
-\n# Python cache\n__pycache__/\n*.pyc
+
+# Python cache
+__pycache__/
+*.pyc
