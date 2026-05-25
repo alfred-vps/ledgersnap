@@ -2,11 +2,11 @@
  * LedgerSnap — Cloudflare Worker (OpenRouter + Gemini 3.1 Flash Lite)
  *
  * Thin proxy: receives base64 JPEG images from the browser,
- * forwards them to OpenRouter (Gemini 3.1 Flash Lite), returns structured JSON.
+ * forwards them to OpenRouter (free model routing), returns structured JSON.
  *
  * API format: OpenAI-compatible chat completions
- * Model: google/gemini-3.1-flash-lite
- * Cost: ~$0.00001 per request — insanely cheap for invoice extraction
+ * Model: openrouter/free — routes to best available free model
+ * Cost: $0 — completely free tier
  */
 
 interface LineItem {
@@ -186,7 +186,7 @@ export default {
             "X-Title": "LedgerSnap",
           },
           body: JSON.stringify({
-            model: "google/gemini-3.1-flash-lite",
+            model: "openrouter/free",
             max_tokens: 4096,
             messages: [
               { role: "system", content: SYSTEM_PROMPT },
