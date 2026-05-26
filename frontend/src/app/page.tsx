@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { pdfToBase64Images, imageToBase64, compileCSV } from "@/lib/pdf-renderer";
 import { extractInvoice, downloadCSV } from "@/lib/api";
 import type { ExtractedInvoice, LineItem } from "@/types";
@@ -24,6 +24,7 @@ interface FileEntry {
 }
 
 const IMAGE_EXTS = [".jpg", ".jpeg", ".png"];
+const LS_PASSWORD_KEY = "ledgersnap_password";
 
 function isImage(filename: string): boolean {
   const lower = filename.toLowerCase();
@@ -60,18 +61,86 @@ function fmtCurrency(amount: number | null): string {
 }
 
 // ─────────────────────────────────────────────
-// Main Component
+// Gate View — Full-screen Cover + Password
 // ─────────────────────────────────────────────
 
-export default function Home() {
+function GateView({ onUnlock, error }: { onUnlock: (pw: string) => void; error: string | null }) {
+  const [pw, setPw] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+
+        {/* Brand */}
+        <div className="text-center mb-10">
+          <h1 className="text-5xl font-bold text-white mb-2">
+            <span className="text-green-400">Ledger</span>Snap
+          </h1>
+          <p className="text-gray-400 text-sm">Your books. Snapped clean.</p>
+        </div>
+
+        {/* Gate Card */}
+        <div className="bg-white/5 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-8 shadow-2xl">
+          <h2 className="text-lg font-semibold text-white mb-1">Unlock App</h2>
+          <p className="text-sm text-gray-400 mb-6">
+            Enter the auth password to access LedgerSnap.
+          </p>
+
+          <input
+            ref={inputRef}
+            type="password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            placeholder="Enter password..."
+            className="w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-xl text-white text-sm
+                       placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent
+                       transition-all mb-4"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && pw.trim()) onUnlock(pw.trim());
+            }}
+          />
+
+          {error && (
+            <div className="mb-4 px-4 py-2.5 bg-red-900/30 border border-red-700/50 rounded-xl text-red-400 text-sm text-center">
+              {error}
+            </div>
+          )}
+
+          <button
+            onClick={() => pw.trim() && onUnlock(pw.trim())}
+            disabled={!pw.trim()}
+            className="w-full py-3 bg-green-500 hover:bg-green-400 disabled:bg-gray-600 disabled:text-gray-400
+                       text-gray-900 font-semibold rounded-xl transition-all duration-200
+                       disabled:cursor-not-allowed"
+          >
+            Unlock App
+          </button>
+        </div>
+
+        {/* Footer */}
+        <p className="text-center text-xs text-gray-600 mt-8">
+          Password-protected · All processing happens in your browser
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// App View — Full LedgerSnap Functionality
+// ─────────────────────────────────────────────
+
+function AppView({ password, onLock }: { password: string; onLock: () => void }) {
   const [dragging, setDragging] = useState(false);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
-  const [password, setPassword] = useState("");
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [pendingProcess, setPendingProcess] = useState(false);
   const [selectedModel, setSelectedModel] = useState("openrouter/free");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -102,13 +171,6 @@ export default function Home() {
 
   const processAll = useCallback(async () => {
     if (files.length === 0) return;
-
-    // Check password — prompt if not set yet
-    if (!password) {
-      setPendingProcess(true);
-      setShowPasswordModal(true);
-      return;
-    }
 
     setProcessing(true);
     setError(null);
@@ -160,6 +222,12 @@ export default function Home() {
         );
 
         if (!response.success || !response.data) {
+          // Check if it's an auth error
+          if (response.error?.toLowerCase().includes("auth") ||
+              response.error?.toLowerCase().includes("password") ||
+              response.error?.toLowerCase().includes("unauthorized")) {
+            throw new Error(`Authentication failed: ${response.error}`);
+          }
           throw new Error(response.error || "Extraction failed");
         }
 
@@ -171,17 +239,19 @@ export default function Home() {
           )
         );
       } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
         setFiles((prev) =>
           prev.map((f) =>
             f.filename === file.name
-              ? {
-                  ...f,
-                  status: "failed",
-                  error: err instanceof Error ? err.message : "Unknown error",
-                }
+              ? { ...f, status: "failed", error: msg }
               : f
           )
         );
+        // If auth error on first file, surface it
+        if (i === 0 && (msg.toLowerCase().includes("auth") || msg.toLowerCase().includes("password"))) {
+          setError(msg);
+          break;
+        }
       }
     }
 
@@ -217,8 +287,6 @@ export default function Home() {
     .filter((f) => f.result?.grand_total)
     .reduce((sum, f) => sum + (f.result!.grand_total || 0), 0);
 
-  // ── Render ──────────────────────────────────
-
   return (
     <main className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -235,6 +303,8 @@ export default function Home() {
               className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-green-400"
             >
               <option value="openrouter/free">🆓 Free</option>
+              <option value="google/gemma-4-26b-a4b-it:free">🔮 Gemma 4 26B (free)</option>
+              <option value="google/gemma-4-31b-it:free">🔮 Gemma 4 31B (free)</option>
               <option value="google/gemini-3.1-flash-lite">⚡ Gemini 3.1 Flash Lite</option>
               <option value="google/gemini-2.5-pro">⭐ Gemini 2.5 Pro</option>
               <option value="openai/gpt-4o">🤖 GPT-4o</option>
@@ -242,55 +312,67 @@ export default function Home() {
               <option value="anthropic/claude-sonnet-4">🧠 Claude Sonnet 4</option>
               <option value="qwen/qwen3-vl-235b-a22b-instruct">🐉 Qwen3 VL</option>
             </select>
-            {/* Hamburger Menu */}
+            {/* Menu */}
             <div className="relative">
-            <button
-              onClick={() => setShowMenu(!showMenu)}
-              className="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-              aria-label="Menu"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d={showMenu ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"}
-                />
-              </svg>
-            </button>
-            {showMenu && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-20 overflow-hidden">
-                  <a
-                    href="https://github.com/alfred-vps/ledgersnap"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                    onClick={() => setShowMenu(false)}
-                  >
-                    <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
-                    </svg>
-                    <span className="font-medium">GitHub</span>
-                    <span className="text-xs text-gray-400 ml-auto">alfred-vps/ledgersnap</span>
-                  </a>
-                  <a
-                    href="https://ledgersnap.pages.dev"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100"
-                    onClick={() => setShowMenu(false)}
-                  >
-                    <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                    </svg>
-                    <span className="font-medium">Live App</span>
-                    <span className="text-xs text-gray-400 ml-auto">ledgersnap.pages.dev</span>
-                  </a>
-                </div>
-              </>
-            )}
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                className="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                aria-label="Menu"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d={showMenu ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"}
+                  />
+                </svg>
+              </button>
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                  <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-20 overflow-hidden">
+                    <a
+                      href="https://github.com/alfred-vps/ledgersnap"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      onClick={() => setShowMenu(false)}
+                    >
+                      <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                      </svg>
+                      <span className="font-medium">GitHub</span>
+                      <span className="text-xs text-gray-400 ml-auto">alfred-vps/ledgersnap</span>
+                    </a>
+                    <a
+                      href="https://ledgersnap.pages.dev"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100"
+                      onClick={() => setShowMenu(false)}
+                    >
+                      <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                      </svg>
+                      <span className="font-medium">Live App</span>
+                      <span className="text-xs text-gray-400 ml-auto">ledgersnap.pages.dev</span>
+                    </a>
+                    {/* Lock button */}
+                    <button
+                      onClick={() => { onLock(); setShowMenu(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                        />
+                      </svg>
+                      <span className="font-medium">Lock App</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
-      </div>
       </header>
 
       <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
@@ -468,59 +550,6 @@ export default function Home() {
           </section>
         )}
       </div>
-
-      {/* Password Modal */}
-      {showPasswordModal && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-30" onClick={() => { setShowPasswordModal(false); setPendingProcess(false); }} />
-          <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm">
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Enter Auth Password</h3>
-              <p className="text-sm text-gray-500 mb-4">
-                This app is password-protected. Enter the auth key to unlock extraction.
-              </p>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password..."
-                autoFocus
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-green-400"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    setShowPasswordModal(false);
-                    if (pendingProcess) {
-                      setPendingProcess(false);
-                      // Trigger processAll via setTimeout to avoid state conflict
-                      setTimeout(() => processAll(), 0);
-                    }
-                  }
-                }}
-              />
-              <div className="flex gap-2 justify-end">
-                <button
-                  onClick={() => { setShowPasswordModal(false); setPendingProcess(false); }}
-                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    setShowPasswordModal(false);
-                    if (pendingProcess) {
-                      setPendingProcess(false);
-                      setTimeout(() => processAll(), 0);
-                    }
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg"
-                >
-                  Unlock
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
     </main>
   );
 }
@@ -585,4 +614,44 @@ function FileRow({ file }: { file: FileEntry }) {
       )}
     </div>
   );
+}
+
+// ─────────────────────────────────────────────
+// Home — Orchestrator: Gate → App
+// ─────────────────────────────────────────────
+
+export default function Home() {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [storedPassword, setStoredPassword] = useState("");
+  const [gateError, setGateError] = useState<string | null>(null);
+
+  // On mount, check localStorage for saved password
+  useEffect(() => {
+    const saved = localStorage.getItem(LS_PASSWORD_KEY);
+    if (saved) {
+      setStoredPassword(saved);
+      setAuthenticated(true);
+    }
+  }, []);
+
+  const handleUnlock = useCallback((pw: string) => {
+    if (!pw.trim()) return;
+    localStorage.setItem(LS_PASSWORD_KEY, pw.trim());
+    setStoredPassword(pw.trim());
+    setAuthenticated(true);
+    setGateError(null);
+  }, []);
+
+  const handleLock = useCallback(() => {
+    localStorage.removeItem(LS_PASSWORD_KEY);
+    setStoredPassword("");
+    setAuthenticated(false);
+    setGateError(null);
+  }, []);
+
+  if (!authenticated) {
+    return <GateView onUnlock={handleUnlock} error={gateError} />;
+  }
+
+  return <AppView password={storedPassword} onLock={handleLock} />;
 }
